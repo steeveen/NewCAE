@@ -22,6 +22,7 @@ code is far away from bugs with the god animal protecting
 from skimage import  io as skio
 from natsort import natsorted
 import os
+import pickle as pkl
 from glob import glob
 import numpy as np
 from skimage.measure import label
@@ -43,8 +44,11 @@ for _p in patientps:
     print('---------------------------------')
 print('+++++++++++++++++++++++++++++')
 print(allregionArea.__len__())
+print(len([i for i in allregionArea if i <200]))
 print(np.mean(allregionArea))
 print(max(allregionArea))
 print(min(allregionArea))
+with open('temp.pkl','wb') as f:
+    pkl.dump(allregionArea,f)
 plt.hist(allregionArea,100)
 plt.show()
