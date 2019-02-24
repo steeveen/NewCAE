@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-'''
+'''用于处理一些垃圾的东西，比如删除错的生成数据
         司马懿：“善败能忍，然厚积薄发”
                                     ——李叔说的
 code is far away from bugs with the god animal protecting
@@ -19,54 +19,90 @@ code is far away from bugs with the god animal protecting
  @Belong = 'NewCAE'  @MadeBy = 'PyCharm'
  @Author = 'steven'   @DateTime = '2019/2/23 20:42'
 '''
+from keras.utils import to_categorical
+
 from FCDenseNet.tiramisu_net import Tiramisu
 import os
 from natsort import natsorted
 from glob import glob
-import  numpy as np
-from keras.callbacks import  CSVLogger
-from keras.losses import  categorical_crossentropy
+import numpy as np
+from keras.callbacks import CSVLogger
+from keras.losses import categorical_crossentropy
 from skimage import io as skio
 from skimage.morphology import label
 from skimage.measure import regionprops
-dataRootp=r'D:\testData'
+
+dataRootp = r'E:\pyWorkspace\CAE\res\cp250'
+
+
+# def datagene(mode='train'):
+#     thickness = 64
+#     if mode == 'train':
+#         dataList = natsorted(glob(os.path.join(dataRootp, '*')))[:2]
+#     else:
+#         dataList = natsorted(glob(os.path.join(dataRootp, '*')))[2:]
+#     while True:
+#         for _patientRoot in dataList:
+#             suvs = np.stack([skio.imread(_p) for _p in natsorted(glob(os.path.join(_patientRoot, 'suv', '*')))])
+#             cts = np.stack([skio.imread(_p) for _p in natsorted(glob(os.path.join(_patientRoot, 'ct', '*')))])
+#             highAreas = np.stack(
+#                 [skio.imread(_p) for _p in natsorted(glob(os.path.join(_patientRoot, 'highAreaInfo', '*')))])
+#             labels = np.stack(
+#                 [skio.imread(_p) for _p in natsorted(glob(os.path.join(_patientRoot, 'labelClear', '*')))]) / 255
+#             suvs = np.pad(suvs, [[0, 0], [3, 3], [3, 3]], mode='constant', constant_values=0)
+#             cts = np.pad(cts, [[0, 0], [3, 3], [3, 3]], mode='constant', constant_values=0)
+#             labels = np.pad(labels, [[0, 0], [3, 3], [3, 3]], mode='constant', constant_values=0)
+#             highAreas = np.pad(highAreas, [[0, 0], [3, 3], [3, 3]], mode='constant', constant_values=0)
+#
+#             x = []
+#             y = []
+#             for i in range(0, suvs.shape[0], thickness):
+#                 if i + thickness < suvs.shape[0]:
+#                     suv = suvs[i:i + thickness, :, :]
+#                     highArea = highAreas[i:i + thickness, :, :]
+#                     ct = cts[i:i + thickness, :, :]
+#                     x.append(np.stack([suv, ct, highArea],axis=-1))
+#                     y.append(labels[i:i + thickness, :, :])
+#                 else:
+#
+#                     suv = suvs[suvs.shape[0] - thickness:suvs.shape[0], :, :]
+#                     highArea = highAreas[suvs.shape[0] - thickness:suvs.shape[0], :, :]
+#                     ct = cts[suvs.shape[0] - thickness:suvs.shape[0], :, :]
+#                     x.append(np.stack([suv, ct, highArea],axis=-1))
+#                     y.append(labels[suvs.shape[0] - thickness:suvs.shape[0], :, :])
+#             yield x,y
+
 def datagene(mode='train'):
-    thickness=64
-    if mode=='train':
-        dataList=natsorted(glob(os.path.join(r'dataRootp','*')))[:2]
+    thickness = 64
+    if mode == 'train':
+        dataList = natsorted(glob(os.path.join(dataRootp, '*')))[:2]
     else:
-        dataList=natsorted(glob(os.path.join(r'dataRootp','*')))[2:]
+        dataList = natsorted(glob(os.path.join(dataRootp, '*')))[2:]
     while True:
         for _patientRoot in dataList:
-            suvs=np.stack([skio.imread(_p) for  _p in natsorted(glob(os.path.join(_patientRoot,'suv')))])
-            cts = np.stack([skio.imread(_p) for _p in natsorted(glob(os.path.join(_patientRoot, 'ct')))])
-            labels = np.stack([skio.imread(_p) for _p in natsorted(glob(os.path.join(_patientRoot, 'labelClear')))])/255
-            suvs=np.pad(suvs,[0,3,3],mode='constant',constant_values=0)
-            cts=np.pad(cts,[0,3,3],mode='constant',constant_values=0)
-            labels=np.pad(labels,[0,3,3],mode='constant',constant_values=0)
-            highAreaLabel=label((suvs>2.5).astype(np.uint8))
-            highRegions=regionprops(highAreaLabel)
-            for _hRegion in highRegions:
-                highAreaLabel[highAreaLabel==_hRegion.label]=_hRegion.area
-            x=[]
-            y=[]
-            for i in range(0,suvs.shape[0],thickness):
-                if i +thickness<suvs.shape[0]:
-                    suv=suvs[i:i+thickness,:,:]
-                    _highAreaLabel=highAreaLabel[i:i+thickness,:,:]
-                    ct=cts[i:i+thickness,:,:]
-                    x.append(np.stack(suv,ct,_highAreaLabel))
-                    y.append(labels[i:i+thickness,:,:])
-                else:
+            suvs = np.stack([skio.imread(_p) for _p in natsorted(glob(os.path.join(_patientRoot, 'suv', '*')))])
+            cts = np.stack([skio.imread(_p) for _p in natsorted(glob(os.path.join(_patientRoot, 'ct', '*')))])
+            highAreas = np.stack(
+                [skio.imread(_p) for _p in natsorted(glob(os.path.join(_patientRoot, 'highAreaInfo', '*')))])
+            labels = np.stack(
+                [skio.imread(_p) for _p in natsorted(glob(os.path.join(_patientRoot, 'labelClear', '*')))]) / 255
+            suvs = np.pad(suvs, [[0, 0], [3, 3], [3, 3]], mode='constant', constant_values=0)
+            cts = np.pad(cts, [[0, 0], [3, 3], [3, 3]], mode='constant', constant_values=0)
+            labels = np.pad(labels, [[0, 0], [3, 3], [3, 3]], mode='constant', constant_values=0)
+            highAreas = np.pad(highAreas, [[0, 0], [3, 3], [3, 3]], mode='constant', constant_values=0)
 
-                    suv = suvs[suvs.shape[0]-thickness:suvs.shape[0], :, :]
-                    _highAreaLabel = highAreaLabel[suvs.shape[0]-thickness:suvs.shape[0], :, :]
-                    ct = cts[suvs.shape[0]-thickness:suvs.shape[0], :, :]
-                    x.append(np.stack(suv, ct, _highAreaLabel))
-                    y.append(labels[i:i + 64, :, :])
-            yield x,y
+            x = []
+            y = []
+            for i in range(0, suvs.shape[0]):
+                    suv = suvs[i, :, :]
+                    highArea = highAreas[i, :, :]
+                    ct = cts[i, :, :]
+                    x.append(np.stack([suv, ct, highArea],axis=-1))
+                    y.append(labels[i, :, :])
+            yield np.array(x),to_categorical(np.array(y),num_classes=2)
 
 
-model=Tiramisu(n_classes=2,)
-model.compile('adam',categorical_crossentropy,metrics=['acc'])
-model.fit_generator(datagene('train'),steps_per_epoch=2,epochs=2,validation_data=datagene('test'),validation_steps=2)
+model = Tiramisu(n_classes=2, input_shape=(256,256,3),)
+model.compile('adam', categorical_crossentropy, metrics=['acc'])
+model.fit_generator(datagene('train'), steps_per_epoch=2, epochs=2, validation_data=datagene('test'),
+                    validation_steps=2)
