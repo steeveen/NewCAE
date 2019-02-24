@@ -27,7 +27,7 @@ from natsort import natsorted
 from glob import glob
 import numpy as np
 from keras.callbacks import CSVLogger
-from keras.losses import categorical_crossentropy
+from keras.losses import categorical_crossentropy,binary_crossentropy
 from skimage import io as skio
 from skimage.morphology import label
 from skimage.measure import regionprops
@@ -99,10 +99,16 @@ def datagene(mode='train'):
                     ct = cts[i, :, :]
                     x.append(np.stack([suv, ct, highArea],axis=-1))
                     y.append(labels[i, :, :])
-            yield np.array(x),to_categorical(np.array(y),num_classes=2)
+            x=np.array(x)
+            y=np.array(y)[:,:,:,np.newaxis]
+            # y=to_categorical(np.array(y),num_classes=2)
+            sliceNum=1
+            for i in range(0,suvs.shape[0],sliceNum):
+                yield x[i:i+sliceNum,:,:,:],y[i:i+sliceNum,:,:]
 
-
-model = Tiramisu(n_classes=2, input_shape=(256,256,3),)
-model.compile('adam', categorical_crossentropy, metrics=['acc'])
-model.fit_generator(datagene('train'), steps_per_epoch=2, epochs=2, validation_data=datagene('test'),
+def dice1(y_true,y_pre,smooth=0.001):
+    return 2*(y_true*y_pre)/(np.sum(y_true)+np.sum(y_pre)+smooth)
+model = Tiramisu(n_classes=1, input_shape=(256,256,3),)
+model.compile('adam', binary_crossentropy, metrics=['acc',dice1])
+model.fit_generator(datagene('train'), steps_per_epoch=560, epochs=2, validation_data=datagene('test'),
                     validation_steps=2)
