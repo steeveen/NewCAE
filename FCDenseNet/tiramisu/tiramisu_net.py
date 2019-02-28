@@ -7,14 +7,10 @@ Created on Wed Aug 15 13:08:47 2018
 refer to https://github.com/SimJeg/FC-DenseNet/blob/master/FC-DenseNet.py
 """
 
-from keras.layers import Activation,MaxPooling2D,UpSampling2D,Dense,BatchNormalization,Input,Reshape,multiply,add,Dropout,AveragePooling2D,GlobalAveragePooling2D,concatenate
-from keras.layers.convolutional import Conv2D,Conv2DTranspose
-from keras.models import Model														  
-import keras.backend as K
-from keras.regularizers import l2
-from keras.engine import Layer,InputSpec
-from keras.utils import conv_utils
-from FCDenseNet.layers import BN_ReLU_Conv, TransitionDown, TransitionUp, SoftmaxLayer
+from keras.layers import Input, concatenate
+from keras.layers.convolutional import Conv2D
+from keras.models import Model
+from FCDenseNet.tiramisu.layers import BN_ReLU_Conv, TransitionDown, TransitionUp, SoftmaxLayer
 
 def Tiramisu(
         input_shape=(None,None,3),
