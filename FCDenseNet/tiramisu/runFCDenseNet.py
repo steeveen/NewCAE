@@ -225,7 +225,7 @@ if __name__ == '__main__':
     # model = DenseNetFCN(input_shape=(256, 256, 3), nb_dense_block=3, nb_layers_per_block=3, dropout_rate=0.8,
     #                     reduction=0.5, initial_kernel_size=(3, 3))
 
-    model = DenseNetFCN(input_shape=(256, 256, 3), )
+    model = DenseNetFCN(input_shape=(256, 256, 3), nb_layers_per_block=3,nb_dense_block=4,initial_kernel_size=(7,7),init_conv_filters=64,growth_rate=32)
     # model = Tiramisu(n_classes=1, input_shape=(256, 256, 3), )
     model.compile('adam', focal_tversky, metrics=['acc', dice, recall, precision])
     # model.compile('adam', binary_crossentropy, metrics=['acc', dice, recall, precision])
@@ -244,7 +244,8 @@ if __name__ == '__main__':
     lrReduce = ReduceLROnPlateau(factor=config.lrReduceRate, patience=config.lrReducePatience, verbose=1)
     estp = EarlyStopping(patience=config.estpPatient, verbose=1, min_delta=config.estpDelta, )
     model.fit_generator(conGene('train'), steps_per_epoch=9787 / 10 * 8, epochs=config.epochs,
-                        callbacks=[logger, mcp, lrReduce, estp, ], validation_data=datagene('test'),
-                        validation_steps=9787 / 10 * 2)
+                        callbacks=[logger, mcp, lrReduce, estp, ], validation_data=conGene('test'),
+                        validation_steps=9787 // 10 * 2)
 
     visualLoss(os.path.join(logP, 'log.txt'))
+    np.min()

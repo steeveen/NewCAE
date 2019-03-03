@@ -34,13 +34,11 @@ patientps=natsorted(glob(os.path.join(p,'*','label')))
 for _p in patientps:
     imgps=natsorted(glob(os.path.join(_p,'*')))
     gts=np.stack(skio.imread(_imgp)/255 for _imgp in imgps)
-    gtLabel=label(gts)
+    gtLabel=label(gts,connectivity=2)
     gtRegions=regionprops(gtLabel)
     for _region in gtRegions:
-        h=_region.bbox[3]-_region.bbox[0]
-        w=_region.bbox[4]-_region.bbox[1]
-        d=_region.bbox[5]-_region.bbox[2]
-        if h<5 and w<5 and d<5:
+        l=np.max([_region.bbox[i+3]-_region.bbox[i] for i in range(3)])
+        if l<5:
             gtLabel[gtLabel==_region.label]=0
     maskdLabel=(gtLabel>0).astype(np.uint8)*255
     patientOp=_p+'Clear'
