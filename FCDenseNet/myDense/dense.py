@@ -19,17 +19,19 @@ code is far away from bugs with the god animal protecting
  @Belong = 'NewCAE'  @MadeBy = 'PyCharm'
  @Author = 'steven'   @DateTime = '2019/3/3 20:43'
 '''
+from keras import Model
 from keras.layers import Input, Conv3D, BatchNormalization, Activation, MaxPool3D, AveragePooling3D, Concatenate, \
-    Conv3DTranspose, MaxPooling3D, Dropout,concatenate
+    Conv3DTranspose, MaxPooling3D, Dropout, concatenate, UpSampling3D, Reshape
 from keras.regularizers import l2
 import keras.backend as K
+from keras_contrib.layers import SubPixelUpscaling
 
 
 def DenseFCN3D(input_shape, nb_dense_block=5, growth_rate=16, nb_layers_per_block=4,
                reduction=0.0, dropout_rate=0.0, weight_decay=1E-4, init_conv_filters=48,
                include_top=True, weights=None, input_tensor=None, classes=1, activation='softmax',
                upsampling_conv=128, upsampling_type='deconv', early_transition=False,
-               transition_pooling='max', initial_kernel_size=(3, 3, 3)):
+               transition_pooling='max', initial_kernel_size=(3, 3, 3),initDis='glorot_normal'):
     imgInput = Input(shape=input_shape)
 
     with K.name_scope('DenseNetFCN'):
@@ -53,7 +55,7 @@ def DenseFCN3D(input_shape, nb_dense_block=5, growth_rate=16, nb_layers_per_bloc
         compression = 1.0 - reduction
 
         # Initial convolution
-        x = Conv3D(init_conv_filters, initial_kernel_size, kernel_initializer='he_normal', padding='same',
+        x = Conv3D(init_conv_filters, initial_kernel_size, kernel_initializer=initDis, padding='same',
                    name='initial_conv3D',
                    use_bias=False, kernel_regularizer=l2(weight_decay))(imgInput)
         x = BatchNormalization(axis=concat_axis, epsilon=1.1e-5, name='initial_bn')(x)
@@ -66,16 +68,115 @@ def DenseFCN3D(input_shape, nb_dense_block=5, growth_rate=16, nb_layers_per_bloc
         out_list = []
 
         if early_transition:
-            x = __transition_block3D(x, nb_filter, compression=compression, weight_decay=weight_decay,
+            x = __transition_block3D(x, nb_filter,initDis, compression=compression, weight_decay=weight_decay,
                                      block_prefix='tr_early', transition_pooling=transition_pooling)
 
         # Add dense blocks and transition down block
         for block_idx in range(nb_dense_block):
-            x, nb_filter = __dense_block(x, nb_layers[block_idx], nb_filter, growth_rate, dropout_rate=dropout_rate,
-                                         weight_decay=weight_decay, block_prefix='dense_%i' % block_idx)
+            x, nb_filter = __dense_block3D(x, nb_layers[block_idx], nb_filter, growth_rate, initDis,dropout_rate=dropout_rate,
+                                           weight_decay=weight_decay, block_prefix='dense_%i' % block_idx)
+            # Skip connection
+            skip_list.append(x)
+            # add transition_block
+            x = __transition_block3D(x, nb_filter,initDis, compression=compression, weight_decay=weight_decay,
+                                     block_prefix='tr_%i' % block_idx, transition_pooling=transition_pooling)
+            nb_filter = int(nb_filter * compression)  # this is calculated inside transition_down_block
+
+        # The last dense_block does not have a transition_down_block
+        # return the concatenated feature maps without the concatenation of the input
+        _, nb_filter, concat_list = __dense_block3D(x, bottleneck_nb_layers, nb_filter, growth_rate,initDis,
+                                                    dropout_rate=dropout_rate, weight_decay=weight_decay,
+                                                    return_concat_list=True,
+                                                    block_prefix='dense_%i' % nb_dense_block)
+        skip_list = skip_list[::-1]  # reverse the skip list
+
+        # Add dense blocks and transition up block
+        for block_idx in range(nb_dense_block):
+            n_filters_keep = growth_rate * nb_layers[nb_dense_block + block_idx]
+
+            # upsampling block must upsample only the feature maps (concat_list[1:]),
+            # not the concatenation of the input with the feature maps (concat_list[0].
+            l = concatenate(concat_list[1:], axis=concat_axis)
+
+            t = __transition_up_block3D(l, nb_filters=n_filters_keep,initDis=initDis, type=upsampling_type, weight_decay=weight_decay,
+                                        block_prefix='tr_up_%i' % block_idx)
+
+            # concatenate the skip connection with the transition block
+            x = concatenate([t, skip_list[block_idx]], axis=concat_axis)
+
+            # Dont allow the feature map size to grow in upsampling dense blocks
+            x_up, nb_filter, concat_list = __dense_block3D(x, nb_layers[nb_dense_block + block_idx + 1],initDis=initDis,
+                                                           nb_filter=growth_rate, growth_rate=growth_rate,
+                                                           dropout_rate=dropout_rate, weight_decay=weight_decay,
+                                                           return_concat_list=True, grow_nb_filters=False,
+                                                           block_prefix='dense_%i' % (nb_dense_block + 1 + block_idx))
+        if early_transition:
+            x_up = __transition_up_block3D(x_up, nb_filters=nb_filter,initDis=initDis ,type=upsampling_type, weight_decay=weight_decay,
+                                           block_prefix='tr_up_early')
+        if include_top:
+            x = Conv3D(classes, (1, 1, 1), activation='linear', padding='same', use_bias=False)(x_up)
+
+            if K.image_data_format() == 'channels_first':
+                channel, row, col, hig = input_shape
+            else:
+                row, col, hig, channel = input_shape
+
+            x = Reshape((row * col * hig, classes))(x)
+            x = Activation(activation)(x)
+            x = Reshape((row, col, hig, classes))(x)
+        else:
+            x = x_up
+
+        end=x
+        model = Model(imgInput, x, name='fcn-densenet')
+        return model
 
 
-def __dense_block3D(x, nb_layers, nb_filter, growth_rate, bottleneck=False, dropout_rate=None,
+def __transition_up_block3D(ip, nb_filters, initDis,type='deconv', weight_decay=1E-4, block_prefix=None):
+    '''Adds an upsampling block. Upsampling operation relies on the the type parameter.
+
+    # Arguments
+        ip: input keras tensor
+        nb_filters: integer, the dimensionality of the output space
+            (i.e. the number output of filters in the convolution)
+        type: can be 'upsampling', 'subpixel', 'deconv'. Determines
+            type of upsampling performed
+        weight_decay: weight decay factor
+        block_prefix: str, for block unique naming
+
+    # Input shape
+        4D tensor with shape:
+        `(samples, channels, rows, cols)` if data_format='channels_first'
+        or 4D tensor with shape:
+        `(samples, rows, cols, channels)` if data_format='channels_last'.
+
+    # Output shape
+        4D tensor with shape:
+        `(samples, nb_filter, rows * 2, cols * 2)` if data_format='channels_first'
+        or 4D tensor with shape:
+        `(samples, rows * 2, cols * 2, nb_filter)` if data_format='channels_last'.
+
+    # Returns
+        a keras tensor
+    '''
+    with K.name_scope('TransitionUp'):
+
+        if type == 'upsampling':
+            x = UpSampling3D(name=name_or_none(block_prefix, '_upsampling'))(ip)
+        elif type == 'subpixel':
+            x = Conv3D(nb_filters, (3, 3, 3), activation='relu', padding='same', kernel_regularizer=l2(weight_decay),
+                       use_bias=False, kernel_initializer=initDis, name=name_or_none(block_prefix, '_conv3D'))(ip)
+            x = SubPixelUpscaling(scale_factor=2, name=name_or_none(block_prefix, '_subpixel'))(x)
+            x = Conv3D(nb_filters, (3, 3, 3), activation='relu', padding='same', kernel_regularizer=l2(weight_decay),
+                       use_bias=False, kernel_initializer=initDis, name=name_or_none(block_prefix, '_conv3D'))(x)
+        else:
+            x = Conv3DTranspose(nb_filters, (3, 3, 3), activation='relu', padding='same', strides=(2, 2, 2),
+                                kernel_initializer=initDis, kernel_regularizer=l2(weight_decay),
+                                name=name_or_none(block_prefix, '_conv3DT'))(ip)
+        return x
+
+
+def __dense_block3D(x, nb_layers, nb_filter, growth_rate,initDis, bottleneck=False, dropout_rate=None,
                     weight_decay=1e-4, grow_nb_filters=True, return_concat_list=False, block_prefix=None):
     '''
     Build a dense_block where the output of each conv_block is fed
@@ -110,8 +211,8 @@ def __dense_block3D(x, nb_layers, nb_filter, growth_rate, bottleneck=False, drop
         x_list = [x]
 
         for i in range(nb_layers):
-            cb = __conv_block3D(x, growth_rate, bottleneck, dropout_rate, weight_decay,
-                              block_prefix=name_or_none(block_prefix, '_%i' % i))
+            cb = __conv_block3D(x, growth_rate,initDis, bottleneck, dropout_rate, weight_decay,
+                                block_prefix=name_or_none(block_prefix, '_%i' % i))
             x_list.append(cb)
 
             x = concatenate([x, cb], axis=concat_axis)
@@ -125,7 +226,7 @@ def __dense_block3D(x, nb_layers, nb_filter, growth_rate, bottleneck=False, drop
             return x, nb_filter
 
 
-def __conv_block3D(ip, nb_filter, bottleneck=False, dropout_rate=None, weight_decay=1e-4, block_prefix=None):
+def __conv_block3D(ip, nb_filter,initDis ,bottleneck=False, dropout_rate=None, weight_decay=1e-4, block_prefix=None):
     '''
     Adds a convolution layer (with batch normalization and relu),
     and optionally a bottleneck layer.
@@ -164,13 +265,13 @@ def __conv_block3D(ip, nb_filter, bottleneck=False, dropout_rate=None, weight_de
         if bottleneck:
             inter_channel = nb_filter * 4
 
-            x = Conv3D(inter_channel, (1, 1, 1), kernel_initializer='he_normal', padding='same', use_bias=False,
+            x = Conv3D(inter_channel, (1, 1, 1), kernel_initializer=initDis, padding='same', use_bias=False,
                        kernel_regularizer=l2(weight_decay), name=name_or_none(block_prefix, '_bottleneck_conv3D'))(x)
             x = BatchNormalization(axis=concat_axis, epsilon=1.1e-5,
                                    name=name_or_none(block_prefix, '_bottleneck_bn'))(x)
             x = Activation('relu')(x)
 
-        x = Conv3D(nb_filter, (3, 3, 3), kernel_initializer='he_normal', padding='same', use_bias=False,
+        x = Conv3D(nb_filter, (3, 3, 3), kernel_initializer=initDis, padding='same', use_bias=False,
                    name=name_or_none(block_prefix, '_conv3D'))(x)
         if dropout_rate:
             x = Dropout(dropout_rate)(x)
@@ -178,7 +279,7 @@ def __conv_block3D(ip, nb_filter, bottleneck=False, dropout_rate=None, weight_de
     return x
 
 
-def __transition_block3D(ip, nb_filter, compression=1.0, weight_decay=1e-4, block_prefix=None,
+def __transition_block3D(ip, nb_filter, initDis,compression=1.0, weight_decay=1e-4, block_prefix=None,
                          transition_pooling='max'):
     '''
     Adds a pointwise convolution layer (with batch normalization and relu),
@@ -216,7 +317,7 @@ def __transition_block3D(ip, nb_filter, compression=1.0, weight_decay=1e-4, bloc
 
         x = BatchNormalization(axis=concat_axis, epsilon=1.1e-5, name=name_or_none(block_prefix, '_bn'))(ip)
         x = Activation('relu')(x)
-        x = Conv3D(int(nb_filter * compression), (1, 1, 1), kernel_initializer='he_normal', padding='same',
+        x = Conv3D(int(nb_filter * compression), (1, 1, 1), kernel_initializer=initDis, padding='same',
                    use_bias=False, kernel_regularizer=l2(weight_decay), name=name_or_none(block_prefix, '_conv3D'))(x)
         if transition_pooling == 'avg':
             x = AveragePooling3D((2, 2, 2), strides=(2, 2, 2))(x)
@@ -228,3 +329,5 @@ def __transition_block3D(ip, nb_filter, compression=1.0, weight_decay=1e-4, bloc
 
 def name_or_none(prefix, name):
     return prefix + name if (prefix is not None and name is not None) else None
+
+
