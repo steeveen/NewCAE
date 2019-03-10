@@ -22,27 +22,36 @@ code is far away from bugs with the god animal protecting
  @Belong = 'NewCAE'  @MadeBy = 'PyCharm'
  @Author = 'steven'   @DateTime = '2019/2/23 16:08'
 '''
-from skimage import  io as skio
+from skimage import io as skio
 from natsort import natsorted
 import os
 from glob import glob
 import numpy as np
 from skimage.measure import label
 from skimage.measure import regionprops
-p=r'E:\pyWorkspace\CAE\res\cp250'
-patientps=natsorted(glob(os.path.join(p,'*','label')))
+from scipy.ndimage import binary_fill_holes
+
+p = r'E:\pyWorkspace\CAE\res\cp250'
+patientps = natsorted(glob(os.path.join(p, '*')))
+minSuvs = []
 for _p in patientps:
-    imgps=natsorted(glob(os.path.join(_p,'*')))
-    gts=np.stack(skio.imread(_imgp)/255 for _imgp in imgps)
-    gtLabel=label(gts,connectivity=2)
-    gtRegions=regionprops(gtLabel)
-    for _region in gtRegions:
-        l=np.max([_region.bbox[i+3]-_region.bbox[i] for i in range(3)])
-        if l<5:
-            gtLabel[gtLabel==_region.label]=0
-    maskdLabel=(gtLabel>0).astype(np.uint8)*255
-    patientOp=_p+'Clear'
+    print('--------------------------------------------')
+    gts = np.stack([skio.imread(_i) / 255 for _i in natsorted(glob(os.path.join(_p, 'label', '*')))])
+    suvs = np.stack([skio.imread(_i) for _i in natsorted(glob(os.path.join(_p, 'suv', '*')))])
+    gtLabel=label(gts, connectivity=1)
+    regions = regionprops(gtLabel)
+    for _r in regions:
+        # sa = np.min([_r.bbox[i + 3] - _r.bbox[i] for i in range(3)])
+        la = np.max([_r.bbox[i + 3] - _r.bbox[i] for i in range(3)])
+        if la<5:
+            minSuvs.append(np.min(suvs[gtLabel == _r.label]))
+            gtLabel[gtLabel == _r.label] = 0
+
+    gtLabel=binary_fill_holes(gtLabel)
+    maskdLabel = (gtLabel > 0).astype(np.uint8) * 255
+    patientOp =os.path.join(_p , 'labelClear')
     os.mkdir(patientOp) if not os.path.exists(patientOp) else None
     for i in range(maskdLabel.shape[0]):
-        skio.imsave(os.path.join(patientOp,str(i)+'.bmp'),maskdLabel[i,:,:])
-
+        skio.imsave(os.path.join(patientOp, str(i) + '.bmp'), maskdLabel[i, :, :])
+minSuvs.sort()
+print(minSuvs)
