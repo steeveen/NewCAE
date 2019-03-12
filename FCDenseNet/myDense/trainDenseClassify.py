@@ -34,6 +34,8 @@ from keras.callbacks import ReduceLROnPlateau, EarlyStopping, ModelCheckpoint, C
 import keras.backend as K
 from FCDenseNet.myDense.dense import dense3DClassify
 from keras.losses import categorical_crossentropy, binary_crossentropy
+from keras.utils import plot_model
+import pickle as pkl
 
 config = Config()
 config.dataRootp = r'E:\pyWorkspace\NewCAE\data\res\highSuvBlock'
@@ -102,9 +104,18 @@ def localRecall(y_true, y_pred):
 def dice(y_true, y_pre, smooth=1e-7):
     return (K.sum(2. * (y_true * y_pre)) + smooth) / (K.sum(y_true) + K.sum(y_pre) + smooth)
 
+def openPkl(filePath):
+    with open(filePath, 'rb') as f:
+        data = pkl.load(f)
+        dy = data['y']
+        dx = data['x']
+        if dx.shape != (32, 32, 32, 3):
+            dx = np.stack([resize(data['x'][:, :, :, 0], (32, 32, 32), preserve_range=True),
+                           resize(data['x'][:, :, :, 1], (32, 32, 32), preserve_range=True),
+                           resize(data['x'][:, :, :, 2], (32, 32, 32), preserve_range=True)], axis=-1)
+        return dx, dy
 
 def datagene(mode='train'):
-    import pickle as pkl
     if mode == 'train':
         allPaths = natsorted(glob(os.path.join(r'E:\pyWorkspace\CAE\res\highSuvArgued', '*')))
         np.random.shuffle(allPaths)
@@ -117,24 +128,10 @@ def datagene(mode='train'):
     iterTimes = 0
     while True:
         _p = allPaths[index]
-        with open(_p, 'rb') as f:
-            data = pkl.load(f)
-            dy = (np.sum(data['y']) > 2).astype(np.int)
-            dx = data['x']
-            if dx.shape != (32, 32, 32):
-                dx = np.stack([resize(data['x'][:, :, :, 0], (32, 32, 32), preserve_range=True),
-                               resize(data['x'][:, :, :, 1], (32, 32, 32), preserve_range=True),
-                               resize(data['x'][:, :, :, 2], (32, 32, 32), preserve_range=True)], axis=-1)
-                # dx = np.stack([
-                #                resize(data['x'][:, :, :, 1], (32, 32, 32), preserve_range=True)
-                #               ], axis=-1)
+        dx,dy=openPkl(_p)
 
-            x.append(dx)
-            y.append(dy)
-            # if dy==0:
-            #     y.append([1,0])
-            # else:
-            #     y.append([0,1])
+        x.append(dx)
+        y.append((np.sum(dy) > 2).astype(np.int))
 
         if len(x) == sliceNum:
             yield np.array(x), np.array(y)
@@ -144,6 +141,51 @@ def datagene(mode='train'):
         if index + 1 >= len(allPaths):
             print(mode + ' itertimes:' + str(iterTimes))
         index = (index + 1) % len(allPaths)
+
+
+
+
+# def datagene(mode='train'):
+#     import pickle as pkl
+#     if mode == 'train':
+#         allPaths = natsorted(glob(os.path.join(r'E:\pyWorkspace\CAE\res\highSuvArgued', '*')))
+#         np.random.shuffle(allPaths)
+#     else:
+#         allPaths = natsorted(glob(os.path.join(r'E:\pyWorkspace\CAE\res\highSuvBlock\test', '*')))
+#     sliceNum = 5
+#     index = 0
+#     x = []
+#     y = []
+#     iterTimes = 0
+#     while True:
+#         _p = allPaths[index]
+#         with open(_p, 'rb') as f:
+#             data = pkl.load(f)
+#             dy = (np.sum(data['y']) > 2).astype(np.int)
+#             dx = data['x']
+#             if dx.shape != (32, 32, 32, 3):
+#                 dx = np.stack([resize(data['x'][:, :, :, 0], (32, 32, 32), preserve_range=True),
+#                                resize(data['x'][:, :, :, 1], (32, 32, 32), preserve_range=True),
+#                                resize(data['x'][:, :, :, 2], (32, 32, 32), preserve_range=True)], axis=-1)
+#                 # dx = np.stack([
+#                 #                resize(data['x'][:, :, :, 1], (32, 32, 32), preserve_range=True)
+#                 #               ], axis=-1)
+#
+#             x.append(dx)
+#             y.append(dy)
+#             # if dy==0:
+#             #     y.append([1,0])
+#             # else:
+#             #     y.append([0,1])
+#
+#         if len(x) == sliceNum:
+#             yield np.array(x), np.array(y)
+#             iterTimes += 1
+#             x = []
+#             y = []
+#         if index + 1 >= len(allPaths):
+#             print(mode + ' itertimes:' + str(iterTimes))
+#         index = (index + 1) % len(allPaths)
 
 
 def focal_loss(classes_num, gamma=2., alpha=.25, e=0.1):
@@ -193,16 +235,18 @@ if __name__ == '__main__':
     from keras.layers import Dense, MaxPool3D, Conv3D, Flatten
     from keras.models import Model
 
-    top = dense3DClassify(input_shape=(32, 32, 32, 3), dropout_rate=0.3, nb_dense_block=5, nb_layers_per_block=9,growth_rate=16,
+    top = dense3DClassify(input_shape=(32, 32, 32, 3), dropout_rate=0.4, nb_dense_block=5, nb_layers_per_block=9,
+                          growth_rate=16, weight_decay=1e-2,
                           classes=512, activation='elu', initDis='glorot_normal')
     x = MaxPool3D((2, 2, 2), strides=[2, 2, 2], padding='valid')(top.output)
-    x = Conv3D(640, (4, 4, 4), activation='elu', padding='same')(x)
+    x = Conv3D(640, (1, 1, 1), activation='elu', padding='same')(x)
     x = Flatten()(x)
     x = Dense(128, activation='elu')(x)
     out = Dense(1, activation='sigmoid')(x)
     model = Model(top.inputs, out)
     model.compile(Adam(lr=1e-3), binary_crossentropy, metrics=['acc', recall, precision])
     model.summary()
+    plot_model(model, 'classfy.png', show_shapes=True)
     cpr = os.path.join(config.expRoot, 'checkPoint')
     if not os.path.exists(cpr):
         os.makedirs(cpr)

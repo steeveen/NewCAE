@@ -64,4 +64,4 @@ def dataArgement(ipRoot,opRoot ,times=10, pklBatchSize=1024):
     for _p in negFiles:
         shutil.copy(_p,os.path.join(opRoot,'aug='+str(fileIndex)+'_'+os.path.basename(_p)))
 if __name__ == '__main__':
-    dataArgement(r'E:\pyWorkspace\CAE\res\highSuvBlock\train',r'E:\pyWorkspace\CAE\res\highSuvArgued')
+    dataArgement(r'E:\pyWorkspace\CAE\res\highSuvBlock_5-\train',r'E:\pyWorkspace\CAE\res\highSuvArgued_5-')

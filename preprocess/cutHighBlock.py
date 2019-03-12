@@ -187,12 +187,17 @@ def main(mode='train'):
             index += 1
 
 
-def mainCenter(mode='train',op=r'E:\pyWorkspace\CAE\res\highSuvBlock'):
+def mainCenter(mode='train',op=r'E:\pyWorkspace\CAE\res\highSuvBlock_5-'):
+    os.mkdir(op) if not os.path.exists(op) else None
     patients = natsorted(glob(os.path.join(ip, '*')))
     if mode == 'train':
-        patients = patients[:60]
+        patients = patients[5:]
+        trainOp=os.path.join(op,mode)
+        os.mkdir(trainOp) if not os.path.exists(trainOp) else None
     else:
-        patients = patients[60:]
+        patients = patients[:5]
+        testOp = os.path.join(op, mode)
+        os.mkdir(testOp) if not os.path.exists(testOp) else None
     index = 0
     for _p in patients:
         print(_p)
@@ -253,5 +258,5 @@ def mainCenter(mode='train',op=r'E:\pyWorkspace\CAE\res\highSuvBlock'):
 if __name__ == '__main__':
     # main( 'train')
     # main( 'test')
-    mainCenter('train')
+    # mainCenter('train')
     mainCenter('test')

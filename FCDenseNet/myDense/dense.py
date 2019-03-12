@@ -22,10 +22,11 @@ code is far away from bugs with the god animal protecting
 from keras import Model
 from keras.layers import Input, Conv3D, BatchNormalization, Activation, MaxPool3D, AveragePooling3D, Concatenate, \
     Conv3DTranspose, MaxPooling3D, Dropout, concatenate, UpSampling3D, Reshape, GlobalAveragePooling3D, \
-    GlobalMaxPooling3D, Dense
+    GlobalMaxPooling3D, Dense, Flatten, Flatten
 from keras.regularizers import l2
 import keras.backend as K
 from keras_contrib.layers import SubPixelUpscaling
+from keras.utils import plot_model
 
 
 def DenseFCN3D(input_shape, nb_dense_block=5, growth_rate=16, nb_layers_per_block=4,
@@ -351,6 +352,7 @@ def dense3DClassify(input_shape=None,
                     input_tensor=None,
                     pooling=None,
                     classes=10,
+                    return_concat_list=False,
                     activation='softmax',
                     transition_pooling='avg', initDis='glorot_normal'):
     with K.name_scope('DenseNet'):
@@ -413,16 +415,18 @@ def dense3DClassify(input_shape=None,
         for block_idx in range(nb_dense_block - 1):
             x, nb_filter = __dense_block3D(x, nb_layers[block_idx], nb_filter, growth_rate, bottleneck=bottleneck,
                                            dropout_rate=dropout_rate, weight_decay=weight_decay,
-                                           block_prefix='dense_%i' % block_idx,initDis=initDis)
+                                           block_prefix='dense_%i' % block_idx, initDis=initDis)
             # add transition_block
             x = __transition_block3D(x, nb_filter, compression=compression, weight_decay=weight_decay,
-                                     block_prefix='tr_%i' % block_idx, transition_pooling=transition_pooling,initDis=initDis)
+                                     block_prefix='tr_%i' % block_idx, transition_pooling=transition_pooling,
+                                     initDis=initDis)
             nb_filter = int(nb_filter * compression)
 
         # The last dense_block does not have a transition_block
-        x, nb_filter = __dense_block3D(x, final_nb_layer, nb_filter, growth_rate, bottleneck=bottleneck,
-                                       dropout_rate=dropout_rate, weight_decay=weight_decay,
-                                       block_prefix='dense_%i' % (nb_dense_block - 1),initDis=initDis)
+        x, nb_filter, _ = __dense_block3D(x, final_nb_layer, nb_filter, growth_rate, initDis=initDis, bottleneck=bottleneck,
+                                          dropout_rate=dropout_rate, weight_decay=weight_decay,
+                                          block_prefix='dense_%i' % (nb_dense_block - 1),return_concat_list=True
+                                         )
 
         x = BatchNormalization(axis=concat_axis, epsilon=1.1e-5, name='final_bn')(x)
         x = Activation('relu')(x)
@@ -438,5 +442,218 @@ def dense3DClassify(input_shape=None,
                 x = GlobalAveragePooling3D()(x)
             elif pooling == 'max':
                 x = GlobalMaxPooling3D()(x)
-        model = Model(img_input, x, name='densenet3D')
+        if return_concat_list:
+            model = Model(img_input, outputs=[x]+_, name='densenet3D')
+        else:
+            model = Model(img_input, outputs=x, name='densenet3D')
         return model
+
+
+def dense3DSemi(input_shape=None,
+                depth=40,
+                nb_dense_block=3,
+                growth_rate=12,
+                nb_filter=-1,
+                nb_layers_per_block=-1,
+                bottleneck=False,
+                reduction=0.0,
+                dropout_rate=0.0,
+                weight_decay=1e-4,
+                subsample_initial_block=False, upsampling_type='deconv',
+                include_top=True,
+                input_tensor=None,
+                pooling=None,
+                semi_layers_per_block=2,
+                semi_growth_rate=2,
+                classes=10,
+                activation='softmax',
+                transition_pooling='avg', initDis='glorot_normal'):
+    encoder = dense3DClassify(input_shape=input_shape,
+                              dropout_rate=dropout_rate,
+                              nb_dense_block=nb_dense_block,
+                              nb_layers_per_block=nb_layers_per_block,
+                              growth_rate=growth_rate,
+                              classes=classes,
+                              return_concat_list=True,
+                              activation=activation,
+                              transition_pooling=transition_pooling,
+
+                              initDis=initDis)
+    with K.name_scope('dense3DSemi'):
+        concat_axis = 1 if K.image_data_format() == 'channels_first' else -1
+
+        i1 = Input(shape=input_shape)
+        i2 = Input(shape=input_shape)
+        x1 = encoder(i1)[0]
+        plot_model(encoder,'forkInsight.png',show_shapes=True)
+        concat_list = encoder(i2)[1:]
+
+        x1 = MaxPool3D((2, 2, 2), strides=[2, 2, 2], padding='valid')(x1)
+        x1 = Conv3D(640, (1, 1, 1), activation='elu', padding='same')(x1)
+        x1 = Flatten()(x1)
+        x1 = Dense(512, activation='elu')(x1)
+        x1 = Dense(256, activation='elu')(x1)
+        x1 = Dense(128, activation='elu')(x1)
+        out1 = Dense(1, activation='sigmoid')(x1)
+
+        bottleneck_nb_layers = semi_layers_per_block
+        nb_layers = [semi_layers_per_block] * (nb_dense_block + 1)
+
+        for block_idx in range(nb_dense_block-1):
+            n_filters_keep = semi_growth_rate * nb_layers[block_idx]
+            l = concatenate(concat_list[1:], axis=concat_axis)
+            x2 = __transition_up_block3D(l, nb_filters=n_filters_keep, initDis=initDis, type=upsampling_type,
+                                         weight_decay=weight_decay,
+                                         block_prefix='tr_up_%i' % block_idx)
+
+            # Dont allow the feature map size to grow in upsampling dense blocks
+            x2_up, nb_filter, concat_list = __dense_block3D(x2, nb_layers[ block_idx ],
+                                                            initDis=initDis,
+                                                            nb_filter=nb_filter, growth_rate=growth_rate,
+                                                            dropout_rate=dropout_rate, weight_decay=weight_decay,
+                                                            return_concat_list=True, grow_nb_filters=False,
+                                                            block_prefix='dense_%i' % (nb_dense_block + 1 + block_idx))
+        x2 = Conv3D(input_shape[3], (1, 1, 1), activation='linear', padding='same', use_bias=False)(x2_up)
+    return Model(inputs=[i1, i2], outputs=[out1, x2])
+
+
+def dense3DClassifyAED(input_shape=None,
+                       depth=40,
+                       nb_dense_block=3,
+                       growth_rate=12,
+                       nb_filter=-1,
+                       nb_layers_per_block=-1,
+                       bottleneck=False,
+                       reduction=0.0,
+                       dropout_rate=0.0,
+                       weight_decay=1e-4,
+                       subsample_initial_block=False, upsampling_type='deconv',
+                       include_top=True,
+                       input_tensor=None,
+                       pooling=None,
+                       classes=10,
+                       activation='softmax',
+                       transition_pooling='avg', initDis='glorot_normal'):
+    with K.name_scope('DenseNet'):
+        concat_axis = 1 if K.image_data_format() == 'channels_first' else -1
+
+        if reduction != 0.0:
+            if not (reduction <= 1.0 and reduction > 0.0):
+                raise ValueError('`reduction` value must lie between 0.0 and 1.0')
+
+        # layers in each dense block
+        if type(nb_layers_per_block) is list or type(nb_layers_per_block) is tuple:
+            nb_layers = list(nb_layers_per_block)  # Convert tuple to list
+
+            if len(nb_layers) != (nb_dense_block):
+                raise ValueError('If `nb_dense_block` is a list, its length must match '
+                                 'the number of layers provided by `nb_layers`.')
+
+            final_nb_layer = nb_layers[-1]
+            nb_layers = nb_layers[:-1]
+        else:
+            if nb_layers_per_block == -1:
+                assert (depth - 4) % 3 == 0, 'Depth must be 3 N + 4 if nb_layers_per_block == -1'
+                count = int((depth - 4) / 3)
+
+                if bottleneck:
+                    count = count // 2
+
+                nb_layers = [count for _ in range(nb_dense_block)]
+                final_nb_layer = count
+            else:
+                final_nb_layer = nb_layers_per_block
+                nb_layers = [nb_layers_per_block] * nb_dense_block
+                rev_layers = nb_layers[::-1]
+                nb_layers.extend(rev_layers[1:])
+
+        # compute initial nb_filter if -1, else accept users initial nb_filter
+        if nb_filter <= 0:
+            nb_filter = 2 * growth_rate
+
+        # compute compression factor
+        compression = 1.0 - reduction
+
+        # Initial convolution
+        if subsample_initial_block:
+            initial_kernel = (7, 7, 7)
+            initial_strides = (2, 2, 2)
+        else:
+            initial_kernel = (3, 3, 3)
+            initial_strides = (1, 1, 1)
+
+        img_input = Input(shape=input_shape)
+
+        x = Conv3D(nb_filter, initial_kernel, kernel_initializer='he_normal', padding='same', name='initial_conv3D',
+                   strides=initial_strides, use_bias=False, kernel_regularizer=l2(weight_decay))(img_input)
+        x = BatchNormalization(axis=concat_axis, epsilon=1.1e-5, name='initial_bn')(x)
+        x = Activation('relu')(x)
+
+        if subsample_initial_block:
+            x = BatchNormalization(axis=concat_axis, epsilon=1.1e-5, name='initial_bn')(x)
+            x = Activation('relu')(x)
+            x = MaxPooling3D((3, 3, 3), strides=(2, 2, 2), padding='same')(x)
+
+        # Add dense blocks
+        for block_idx in range(nb_dense_block - 1):
+            x, nb_filter = __dense_block3D(x, nb_layers[block_idx], nb_filter, growth_rate, bottleneck=bottleneck,
+                                           dropout_rate=dropout_rate, weight_decay=weight_decay,
+                                           block_prefix='dense_%i' % block_idx, initDis=initDis)
+            # add transition_block
+            x = __transition_block3D(x, nb_filter, compression=compression, weight_decay=weight_decay,
+                                     block_prefix='tr_%i' % block_idx, transition_pooling=transition_pooling,
+                                     initDis=initDis)
+            nb_filter = int(nb_filter * compression)
+
+        # The last dense_block does not have a transition_block
+        y1, nb_filterY1 = __dense_block3D(x, final_nb_layer, nb_filter, growth_rate, bottleneck=bottleneck,
+                                          dropout_rate=dropout_rate, weight_decay=weight_decay,
+                                          block_prefix='dense_%i' % (nb_dense_block - 1), initDis=initDis)
+        y1 = BatchNormalization(axis=concat_axis, epsilon=1.1e-5, name='final_bn')(y1)
+        y1 = Activation('relu')(y1)
+        if pooling == 'avg':
+            y1 = GlobalAveragePooling3D()(y1)
+        elif pooling == 'max':
+            y1 = GlobalMaxPooling3D()(y1)
+        y1 = Dense(classes, activation=activation)(y1)
+
+        y2 = x
+        for block_idx in range(nb_dense_block):
+            n_filters_keep = growth_rate * nb_layers[nb_dense_block + block_idx]
+
+            # upsampling block must upsample only the feature maps (concat_list[1:]),
+            # not the concatenation of the input with the feature maps (concat_list[0].
+
+            y2 = __transition_up_block3D(y2, nb_filters=n_filters_keep, initDis=initDis, type=upsampling_type,
+                                         weight_decay=weight_decay,
+                                         block_prefix='tr_up_%i' % block_idx)
+
+            y2, nb_filter, concat_list = __dense_block3D(y2, nb_layers[nb_dense_block + block_idx + 1],
+                                                         initDis=initDis,
+                                                         nb_filter=growth_rate, growth_rate=growth_rate,
+                                                         dropout_rate=dropout_rate, weight_decay=weight_decay,
+                                                         return_concat_list=True, grow_nb_filters=False,
+                                                         block_prefix='dense_%i' % (nb_dense_block + 1 + block_idx))
+        y2 = Conv3D(classes, (1, 1, 1), activation='linear', padding='same', use_bias=False)(y2)
+
+        # if include_top:
+        #     if
+        # pooling == 'avg':
+        # x = GlobalAveragePooling3D()(x)
+        # elif pooling == 'max':
+        # x = GlobalMaxPooling3D()(x)
+        # x = Dense(classes, activation=activation)(x)
+        # else:
+        if pooling == 'avg':
+            x = GlobalAveragePooling3D()(x)
+        elif pooling == 'max':
+            x = GlobalMaxPooling3D()(x)
+        model = Model(img_input, x, name='densenet3D')
+    return model
+if __name__ == '__main__':
+    from keras.utils import plot_model
+    mm = dense3DSemi(input_shape=(32, 32, 32, 3), dropout_rate=0.4, nb_dense_block=5, nb_layers_per_block=9,
+                     growth_rate=16,
+                     classes=512, activation='elu', initDis='glorot_normal')
+    mm.summary()
+    plot_model(mm,'semiArc.png',show_shapes=True,rankdir='TB')
