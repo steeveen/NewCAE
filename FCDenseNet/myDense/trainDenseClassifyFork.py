@@ -58,15 +58,26 @@ def openPkl(filePath):
 
 
 def semiDatagene(mode='train', batchSize=5):
+    # if mode == 'train':
+    #     x1Paths = natsorted(glob(os.path.join(r'E:\pyWorkspace\CAE\res\highSuvArgued', '*')))
+    #     # np.random.shuffle(x1Paths)
+    #     x2Paths = natsorted(glob(os.path.join(r'E:\pyWorkspace\CAE\res\highSuvBlock\test', '*')))
+    #     # np.random.shuffle(x2Paths)
+    #     x2Paths = x2Paths[:len(x1Paths)]
+    # else:
+    #     x1Paths = natsorted(glob(os.path.join(r'E:\pyWorkspace\CAE\res\highSuvBlock\test', '*')))
+    #     x2Paths = natsorted(glob(os.path.join(r'E:\pyWorkspace\CAE\res\highSuvBlock\test', '*')))
+
     if mode == 'train':
-        x1Paths = natsorted(glob(os.path.join(r'E:\pyWorkspace\CAE\res\highSuvArgued', '*')))
+        x1Paths = natsorted(glob(os.path.join(r'E:\pyWorkspace\CAE\res\highSuvArgued_5-' , '*')))
         np.random.shuffle(x1Paths)
-        x2Paths = natsorted(glob(os.path.join(r'E:\pyWorkspace\CAE\res\highSuvBlock\test', '*')))
+        x2Paths = natsorted(glob(os.path.join(r'E:\pyWorkspace\CAE\res\highSuvBlock_5-\test', '*')))
+
+        x2Paths = x2Paths * 3
         np.random.shuffle(x2Paths)
-        x2Paths = x2Paths[:len(x1Paths)]
     else:
-        x1Paths = natsorted(glob(os.path.join(r'E:\pyWorkspace\CAE\res\highSuvBlock\test', '*')))
-        x2Paths = natsorted(glob(os.path.join(r'E:\pyWorkspace\CAE\res\highSuvBlock\test', '*')))
+        x1Paths = natsorted(glob(os.path.join(r'E:\pyWorkspace\CAE\res\highSuvBlock_5-\test', '*')))
+        x2Paths = natsorted(glob(os.path.join(r'E:\pyWorkspace\CAE\res\highSuvBlock_5-\test', '*')))
     index = 0
     x1 = []
     x2 = []
@@ -120,25 +131,41 @@ def precision(y_true, y_pred):
     precision = (true_positives + K.epsilon() * (1e-3)) / (predicted_positives + K.epsilon())
     return precision
 
+def tversky(y_true, y_pred, smooth=1e-7):
+    y_true_pos = K.flatten(y_true)
+    y_pred_pos = K.flatten(y_pred)
+    true_pos = K.sum(y_true_pos * y_pred_pos)
+    false_neg = K.sum(y_true_pos * (1 - y_pred_pos))
+    false_pos = K.sum((1 - y_true_pos) * y_pred_pos)
+    alpha = 0.7
+    return (true_pos + smooth) / (true_pos + alpha * false_neg + (1 - alpha) * false_pos + smooth)
 
-def mmse(y_true, y_pred):
-    pass
+
+def tversky_loss(y_true, y_pred):
+    return 1 - tversky(y_true, y_pred)
+
+
+def focal_tversky(y_true, y_pred):
+    pt_1 = tversky(y_true, y_pred)
+    gamma = 0.75
+    # gamma = 2
+    # gamma = 2
+    return K.pow((1 - pt_1), 1 / gamma)
 
 
 if __name__ == '__main__':
-    from keras.layers import Dense, MaxPool3D, Conv3D, Flatten
-    from keras.models import Model
 
-    batchSize = 2
-    model = dense3DSemi(input_shape=(32, 32, 32, 3), dropout_rate=0.4, nb_dense_block=5, nb_layers_per_block=9,
-                        growth_rate=16, semi_growth_rate=1, semi_layers_per_block=2,
+    batchSize = 5
+    model = dense3DSemi(input_shape=(32, 32, 32, 3), dropout_rate=0.8, nb_dense_block=5, nb_layers_per_block=10,
+                        growth_rate=8, semi_growth_rate=1, semi_layers_per_block=2, transition_pooling='max',
                         classes=512, activation='elu', initDis='RandomNormal')
-    model.compile(Adam(lr=1e-3), {'dense_5': binary_crossentropy, 'conv3d_2': mse},
+    model.compile(Adam(lr=1e-3), {'dense_5': focal_tversky, 'conv3d_2': mse},
                   loss_weights={'dense_5': 0.99, 'conv3d_2': 0.01}, metrics={'dense_5': [recall, precision]})
 
     plot_model(model, 'semiArcFork.png', show_shapes=True, rankdir='TB')
     model.summary()
     cpr = os.path.join(config.expRoot, 'checkPoint')
+
     if not os.path.exists(cpr):
         os.makedirs(cpr)
     mcp = ModelCheckpoint(
@@ -156,5 +183,11 @@ if __name__ == '__main__':
                         callbacks=[logger, mcp, lrReduce, estp, ],
                         validation_data=semiDatagene(mode='test', batchSize=batchSize),
                         validation_steps=int(np.ceil(4809 / batchSize)))
+
+    # model.fit_generator(semiDatagene(mode='train', batchSize=batchSize), steps_per_epoch=10,
+    #                     epochs=config.epochs,
+    #                     callbacks=[logger, mcp, lrReduce, estp, ],
+    #                     validation_data=semiDatagene(mode='test', batchSize=batchSize),
+    #                     validation_steps=10)
 
     visualLoss(os.path.join(logP, 'log.txt'))

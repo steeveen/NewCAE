@@ -255,4 +255,4 @@ def dice_coef_loss(y_true, y_pred, smooth=1.):
 
 
 if __name__ == '__main__':
-    visualLoss(r'E:\pyWorkspace\LymDetection\log\6.txt')
+    visualLoss(r'E:\pyWorkspace\NewCAE\FCDenseNet\myDense\experiment\log\log.txt')
