@@ -352,3 +352,5 @@ if __name__ == '__main__':
     gan = MyGan(realRoot, fakeRoot, chRoot=r'E:\pyWorkspace\NewCAE\GAN\chp2',
                 geneImgPath=r'E:\pyWorkspace\NewCAE\GAN\geneImg2')
     gan.trainGan()
+    from keras.applications import vgg16
+    m=vgg16.VGG16()

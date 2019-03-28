@@ -22,7 +22,7 @@ code is far away from bugs with the god animal protecting
 from keras import Model
 from keras.layers import Input, Conv3D, BatchNormalization, Activation, MaxPool3D, AveragePooling3D, Concatenate, \
     Conv3DTranspose, MaxPooling3D, Dropout, concatenate, UpSampling3D, Reshape, GlobalAveragePooling3D, \
-    GlobalMaxPooling3D, Dense, Flatten, Flatten
+    GlobalMaxPooling3D, Dense, Flatten, Flatten, GlobalAveragePooling2D, GlobalMaxPooling2D, MaxPool2D
 from keras.regularizers import l2
 import keras.backend as K
 from keras_contrib.layers import SubPixelUpscaling
@@ -423,10 +423,11 @@ def dense3DClassify(input_shape=None,
             nb_filter = int(nb_filter * compression)
 
         # The last dense_block does not have a transition_block
-        x, nb_filter, _ = __dense_block3D(x, final_nb_layer, nb_filter, growth_rate, initDis=initDis, bottleneck=bottleneck,
+        x, nb_filter, _ = __dense_block3D(x, final_nb_layer, nb_filter, growth_rate, initDis=initDis,
+                                          bottleneck=bottleneck,
                                           dropout_rate=dropout_rate, weight_decay=weight_decay,
-                                          block_prefix='dense_%i' % (nb_dense_block - 1),return_concat_list=True
-                                         )
+                                          block_prefix='dense_%i' % (nb_dense_block - 1), return_concat_list=True
+                                          )
 
         x = BatchNormalization(axis=concat_axis, epsilon=1.1e-5, name='final_bn')(x)
         x = Activation('relu')(x)
@@ -443,7 +444,7 @@ def dense3DClassify(input_shape=None,
             elif pooling == 'max':
                 x = GlobalMaxPooling3D()(x)
         if return_concat_list:
-            model = Model(img_input, outputs=[x]+_, name='densenet3D')
+            model = Model(img_input, outputs=[x] + _, name='densenet3D')
         else:
             model = Model(img_input, outputs=x, name='densenet3D')
         return model
@@ -485,7 +486,7 @@ def dense3DSemi(input_shape=None,
         i1 = Input(shape=input_shape)
         i2 = Input(shape=input_shape)
         x1 = encoder(i1)[0]
-        plot_model(encoder,'forkInsight.png',show_shapes=True)
+        plot_model(encoder, 'forkInsight.png', show_shapes=True)
         concat_list = encoder(i2)[1:]
 
         x1 = MaxPool3D((2, 2, 2), strides=[2, 2, 2], padding='valid')(x1)
@@ -499,7 +500,7 @@ def dense3DSemi(input_shape=None,
         bottleneck_nb_layers = semi_layers_per_block
         nb_layers = [semi_layers_per_block] * (nb_dense_block + 1)
 
-        for block_idx in range(nb_dense_block-1):
+        for block_idx in range(nb_dense_block - 1):
             n_filters_keep = semi_growth_rate * nb_layers[block_idx]
             l = concatenate(concat_list[1:], axis=concat_axis)
             x2 = __transition_up_block3D(l, nb_filters=n_filters_keep, initDis=initDis, type=upsampling_type,
@@ -507,7 +508,7 @@ def dense3DSemi(input_shape=None,
                                          block_prefix='tr_up_%i' % block_idx)
 
             # Dont allow the feature map size to grow in upsampling dense blocks
-            x2_up, nb_filter, concat_list = __dense_block3D(x2, nb_layers[ block_idx ],
+            x2_up, nb_filter, concat_list = __dense_block3D(x2, nb_layers[block_idx],
                                                             initDis=initDis,
                                                             nb_filter=nb_filter, growth_rate=growth_rate,
                                                             dropout_rate=dropout_rate, weight_decay=weight_decay,
@@ -517,10 +518,113 @@ def dense3DSemi(input_shape=None,
     return Model(inputs=[i1, i2], outputs=[out1, x2])
 
 
+def dense2DSemi(input_shape=None,
+                depth=40,
+                nb_dense_block=3,
+                growth_rate=12,
+                nb_filter=-1,
+                nb_layers_per_block=-1,
+                bottleneck=False,
+                reduction=0.0,
+                dropout_rate=0.0,
+                weight_decay=1e-4,
+                subsample_initial_block=False, upsampling_type='deconv',
+                include_top=True,
+                input_tensor=None,
+                pooling=None,
+                semi_layers_per_block=2,
+                semi_growth_rate=2,
+                classes=10,
+                activation='softmax',
+                transition_pooling='avg', initDis='glorot_normal'):
+    from keras_contrib.applications.densenet import __transition_block, __transition_up_block, __dense_block, \
+        __conv_block
+    from keras.layers import Conv2D
+    with K.name_scope('DenseNet2D'):
+        final_nb_layer = nb_layers_per_block
+        nb_layers = [nb_layers_per_block] * nb_dense_block
+        if nb_filter <= 0:
+            nb_filter = 2 * growth_rate
+        compression = 1.0 - reduction
+        # Initial convolution
+        if subsample_initial_block:
+            initial_kernel = (7, 7)
+            initial_strides = (2, 2)
+        else:
+            initial_kernel = (3, 3)
+            initial_strides = (1, 1)
+        img_input = Input(shape=input_shape)
+        x = Conv2D(nb_filter, initial_kernel, kernel_initializer='he_normal', padding='same', name='initial_conv3D',
+                   strides=initial_strides, use_bias=False, kernel_regularizer=l2(weight_decay))(img_input)
+
+        for block_idx in range(nb_dense_block - 1):
+            x, nb_filter = __dense_block(x, nb_layers[block_idx], nb_filter, growth_rate, bottleneck, dropout_rate,
+                                         weight_decay, block_prefix='dense_%i' % block_idx, )
+            x = __transition_block(x, nb_filter, compression, weight_decay, 'tr_%i' % block_idx,
+                                   transition_pooling=transition_pooling)
+            nb_filter = int(nb_filter * compression)
+        x, nb_filter, _ = __dense_block(x, final_nb_layer, nb_filter, growth_rate, bottleneck, dropout_rate,
+                                        weight_decay, block_prefix='dense_%i' % (nb_dense_block - 1),
+                                        return_concat_list=True)
+        x = BatchNormalization(axis=-1, epsilon=1.1e-5, name='finale_bn')(x)
+        x = Activation('relu')(x)
+        if include_top:
+            if pooling == 'avg':
+                x = GlobalAveragePooling2D()(x)
+            elif pooling == 'max':
+                x = GlobalMaxPooling2D()(x)
+            x = Dense(classes, activation=activation, kernel_initializer='he_uniform')(x)
+        else:
+            if pooling == 'avg':
+                x = GlobalAveragePooling2D()(x)
+            elif pooling == 'max':
+                x = GlobalMaxPooling2D()(x)
+        encoder = Model(img_input, outputs=[x] + _, name='densenet2D')
+        i1 = Input(shape=input_shape)
+        i2 = Input(shape=input_shape)
+        x1 = encoder(i1)[0]
+        plot_model(encoder, 'forkInsight2D.png', show_shapes=True)
+        concat_list = encoder(i2)[1:]
+
+        x1 = MaxPool2D((2, 2), strides=[2, 2], padding='valid')(x1)
+        x1 = Conv2D(640, (1, 1), activation='elu', padding='same', kernel_initializer='he_uniform')(x1)
+        x1 = Flatten()(x1)
+        x1 = Dense(512, activation='elu', kernel_initializer='he_uniform')(x1)
+        x1 = Dense(256, activation='elu', kernel_initializer='he_uniform')(x1)
+        x1 = Dense(128, activation='elu', kernel_initializer='he_uniform')(x1)
+        out1 = Dense(1, activation='sigmoid', kernel_initializer='he_uniform')(x1)
+
+        bottleneck_nb_layers = semi_layers_per_block
+        nb_layers = [semi_layers_per_block] * (nb_dense_block + 1)
+
+        for block_idx in range(nb_dense_block - 1):
+            n_filters_keep = semi_growth_rate * nb_layers[block_idx]
+            l = concatenate(concat_list[1:], axis=-1)
+            x2 = __transition_up_block(l, nb_filters=n_filters_keep, type=upsampling_type, weight_decay=weight_decay,
+                                       block_prefix='tr_up_%i' % block_idx)
+
+            x2_up, nb_filter, concat_list = __dense_block(x2, nb_layers[block_idx], nb_filter=nb_filter,
+                                                          growth_rate=growth_rate, dropout_rate=dropout_rate,
+                                                          weight_decay=weight_decay, return_concat_list=True,
+                                                          grow_nb_filters=False,
+                                                          block_prefix='dense_%i' % (nb_dense_block + 1 + block_idx))
+
+        x2 = Conv2D(input_shape[2], (1, 1), activation='linear', padding='same', use_bias=False,
+                    kernel_initializer='he_uniform')(x2_up)
+    return Model(inputs=[i1, i2], outputs=[out1, x2])
+
+
 if __name__ == '__main__':
     from keras.utils import plot_model
-    mm = dense3DSemi(input_shape=(32, 32, 32, 3), dropout_rate=0.4, nb_dense_block=5, nb_layers_per_block=9,
+
+    #
+    # mm = dense3DSemi(input_sh ape=(32, 32, 32, 3), dropout_rate=0.4, nb_dense_block=5, nb_layers_per_block=9,
+    #                  growth_rate=16,
+    #                  classes=512, activation='elu', initDis='glorot_normal')
+    # mm.summary()
+    # plot_model(mm, 'semiArc.png', show_shapes=True, rankdir='TB')
+    mm = dense2DSemi(input_shape=(32, 32, 3), dropout_rate=0.4, nb_dense_block=5, nb_layers_per_block=9,
                      growth_rate=16,
                      classes=512, activation='elu', initDis='glorot_normal')
     mm.summary()
-    plot_model(mm,'semiArc.png',show_shapes=True,rankdir='TB')
+    plot_model(mm, 'semiArc2D.png', show_shapes=True, rankdir='TB')
