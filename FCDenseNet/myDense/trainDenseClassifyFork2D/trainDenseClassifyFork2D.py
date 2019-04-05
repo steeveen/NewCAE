@@ -20,21 +20,18 @@ code is far away from bugs with the god animal protecting
  @Author = 'steven'   @DateTime = '2019/3/23 16:39'
 '''
 import keras.backend as K
-from keras.optimizers import Adam
 import os
 
 from keras.utils import plot_model
 from natsort import natsorted
 from glob import glob
-from skimage.transform import resize
 
 import numpy as np
 from Config import Config
-from kerasTools import visualLoss, recall, precision
+from Tools.kerasTools import visualLoss
 from keras.callbacks import ReduceLROnPlateau, EarlyStopping, ModelCheckpoint, CSVLogger
 from FCDenseNet.myDense.dense import dense2DSemi
-from keras.layers import Dropout
-from keras.losses import categorical_crossentropy, binary_crossentropy, mse
+from keras.losses import binary_crossentropy, mse
 import pickle as pkl
 from keras.optimizers import RMSprop
 
@@ -59,9 +56,9 @@ def openPkl(filePath):
         with open(filePath, 'rb') as f:
             data = pkl.load(f)
             dy = (np.sum(data['gt']) > 4).astype(np.int8)
-            dx = data['suv'].transpose((1, 2, 0))
-            dxPET=data['ct'].transpose((1, 2, 0))
-            return np.concatenate([dx,dxPET],axis=-1), dy
+            dxSUV = data['suv'].transpose((1, 2, 0))
+            dxCT = data['ct'].transpose((1, 2, 0))
+            return np.concatenate([dxSUV, dxCT], axis=-1), dy
 
     except pkl.UnpicklingError:
 
@@ -115,8 +112,6 @@ def tversky_loss(y_true, y_pred):
 def focal_tversky(y_true, y_pred):
     pt_1 = tversky(y_true, y_pred)
     gamma = 0.75
-    # gamma = 2
-    # gamma = 2
     return K.pow((1 - pt_1), 1 / gamma)
 
 
@@ -151,7 +146,17 @@ def semiDatagene(mode='train', batchSize=5):
         y.append(dy1)
 
         if len(x1) == batchSize:
-            yield [(np.array(x1)-np.min(x1))/(np.max(x1)-np.min(x)), (np.array(x2)-np.mean(x2))/np.std(x2)], [np.array(y), (np.array(x2)-np.mean(x2))/np.std(x2)]
+            suv1 = np.array([_[:,:,0:3] for _ in x1])
+            suv1 = (suv1 - suv1.min()) / (suv1.max() - suv1.min())
+            ct1 = np.array([_[:,:,3:] for _ in x1])
+            ct1 = (ct1 - ct1.min()) / (ct1.max() - ct1.min())
+            suv2 = np.array([_[:,:,0:3] for _ in x2])
+            suv2 = (suv2 - suv2.min()) / (suv2.max() - suv2.min())
+            ct2 = np.array([_[:,:,3:] for _ in x2])
+            ct2 = (ct2 - ct2.min()) / (ct2.max() - ct2.min())
+            xarr1 = np.concatenate([suv1, ct1],axis=-1)
+            xarr2 = np.concatenate([suv2, ct2],axis=-1)
+            yield [xarr1, xarr2], [np.array(y), xarr2]
             iterTimes += 1
             x1 = []
             x2 = []
@@ -168,12 +173,12 @@ def bse(y_t, y_p):
 if __name__ == '__main__':
 
     model = dense2DSemi(input_shape=(32, 32, 6), dropout_rate=0.5, nb_dense_block=5, nb_layers_per_block=7,
-                        growth_rate=64, semi_growth_rate=8, semi_layers_per_block=5, transition_pooling='max',
+                        growth_rate=32, semi_growth_rate=8, semi_layers_per_block=5, transition_pooling='max',
                         classes=512, activation='elu', initDis='he_uniform')
     # model.compile(Adam(lr=1e-3), {'dense_5': binary_crossentropy, 'conv2d_2': mse},
     #               loss_weights={'dense_5': 0.99, 'conv2d_2': 0.01}, metrics={'dense_5': [recall, precision]})
-    model.compile(RMSprop(lr=1e-3, decay=0.995, ), {'dense_5': bse, 'conv2d_2': mse},
-                  loss_weights={'dense_5': 0.99, 'conv2d_2': 0.01}, metrics={'dense_5': [recall, precision]})
+    model.compile(RMSprop(lr=1e-3, decay=0.995, ), {'dense_5': binary_crossentropy, 'conv2d_2': mse},
+                  loss_weights={'dense_5': 0.99, 'conv2d_2': 0.01}, metrics={'dense_5': [recall, precision,'acc']})
 
     plot_model(model, 'semiArcFork2D.png', show_shapes=True, rankdir='TB')
     model.summary()
@@ -183,7 +188,7 @@ if __name__ == '__main__':
         os.makedirs(cpr)
     mcp = ModelCheckpoint(
         os.path.join(cpr,
-                     r'AugClassifyFork2D_{epoch:03d}-{val_loss:.6f}-{val_dense_5_loss:.6f}-{val_conv2d_2_loss:.6f}-{dense_5_recall:.6f}-{dense_5_precision:.6f}.hdf5'),
+                     r'AugClassifyFork2D_{epoch:03d}-{val_loss:.6f}-{val_dense_5_loss:.6f}-{val_conv2d_2_loss:.6f}-{dense_5_recall:.6f}-{dense_5_precision:.6f}-{dense_5_acc:.6f}.hdf5'),
         'val_loss', period=2)
     logP = os.path.join(config.expRoot, 'log')
     if not os.path.exists(logP):

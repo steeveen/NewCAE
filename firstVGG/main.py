@@ -47,10 +47,9 @@ from glob import glob
 import numpy as np
 from skimage import io as skio
 from Config import Config
-from kerasTools import visualLoss, recall, precision
+from zhuhonglin.kerasTools import visualLoss, recall, precision
 from keras.callbacks import ReduceLROnPlateau, EarlyStopping, ModelCheckpoint, CSVLogger
-from keras.losses import binary_crossentropy, categorical_crossentropy
-import keras.backend as K
+from keras.losses import binary_crossentropy
 
 config = Config()
 config.dataRootp = r'E:\pyWorkspace\CAE\res\cp250'
@@ -108,7 +107,6 @@ def datagene(mode='train'):
 
 
 def buildModel():
-    from keras_contrib.applications import ResNet101, ResNet152
     from keras.applications import VGG19
     from keras.layers import Dense, Flatten, BatchNormalization
     from keras.models import Model

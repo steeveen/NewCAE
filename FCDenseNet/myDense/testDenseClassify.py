@@ -20,19 +20,14 @@ code is far away from bugs with the god animal protecting
  @Author = 'steven'   @DateTime = '2019/3/7 17:39'
 '''
 from keras.models import load_model
-from keras.optimizers import Adam
-from keras_contrib.applications.densenet import DenseNetImageNet161
 import os
 from natsort import natsorted
 from glob import glob
 from skimage.transform import resize
 import numpy as np
-from skimage import io as skio
 from Config import Config
-from kerasTools import visualLoss, recall, precision
-from keras.callbacks import ReduceLROnPlateau, EarlyStopping, ModelCheckpoint, CSVLogger
+from Tools.kerasTools import recall, precision
 import keras.backend as K
-from FCDenseNet.myDense.dense import dense3DClassify
 
 config = Config()
 # config.dataRootp = r'E:\pyWorkspace\CAE\res\highSuvBlock\test'

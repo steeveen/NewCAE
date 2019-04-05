@@ -28,7 +28,6 @@ import keras.backend as K
 from keras_contrib.layers import SubPixelUpscaling
 from keras.utils import plot_model
 
-
 def DenseFCN3D(input_shape, nb_dense_block=5, growth_rate=16, nb_layers_per_block=4,
                reduction=0.0, dropout_rate=0.0, weight_decay=1E-4, init_conv_filters=48,
                include_top=True, weights=None, input_tensor=None, classes=1, activation='softmax',
