@@ -40,7 +40,7 @@ config.epochs = 2000
 config.batchSize = 5
 config.lrReduceRate = 0.1
 config.lrReducePatience = 20
-config.estpPatient = 30
+config.estpPatient = 40
 config.estpDelta = 5e-5
 config.lr = 1e-4
 config.thr = 1
@@ -62,14 +62,19 @@ config.tts = 0.8
 # config.testIds = [1, 11, 25, 39, 41, 43, 56, 59, 64, 67,
 #                   ]
 
-config.trainIds = [20, 23, 24, 25, 26, 31, 39, 32, 33, 34,
-                   35, 36, 37, 38, 40, 41, 42, 43, 44, 45,
-                   46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
-                   56, 57, 58, 59, 60, 61, 62, 63, 64, 65,
-                   66, 67, 68, 69, 70, 71, 72, 74, 76, 77,
-                   78, 79, 73, 75,
+# config.trainIds = [1, 4, 7, 11, 15, 17, 20, 23, 24, 25, 26, 31,
+#                    39, 32, 33, 34, 35, 36, 37, 38, 40, 41, 42, 43,
+#                    44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
+#                    56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67,
+#                    ]
+# config.testIds = [68, 69, 70, 71, 72, 74, 76, 77, 78, 79, 73, 75, ]
+
+config.trainIds = [1, 4, 7, 11, 15, 17, 20, 23, 24, 25, 26, 31,
+                   39, 32, 33, 34, 35, 36, 37, 38, 40, 41, 42, 43,
+                   44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
+                   56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67,
                    ]
-config.testIds = [1, 4, 7, 11, 15, 17, ]
+config.testIds = [68, 69, 70, 71, 72, 74, 76, 77, 78, 79, 73, 75, ]
 
 trainSuvps = []
 trainCtps = []
@@ -117,6 +122,9 @@ def genePath():
     gene(config.dataRootp, 'suv', testSuvps, 'test')
     gene(config.dataRootp, 'ct', testCtps, 'test')
     gene(config.dataRootp, 'labelClear', testGtps, 'test')
+    # gene(config.dataRootp, 'suv', testSuvps, 'train')
+    # gene(config.dataRootp, 'ct', testCtps, 'train')
+    # gene(config.dataRootp, 'labelClear', testGtps, 'train')
 
 
 def dataGene(batchSize, mode='train'):
@@ -137,7 +145,6 @@ def dataGene(batchSize, mode='train'):
         # suv = np.stack([skio.imread(_) for _ in suvps[index]], axis=-1)
         # ct = np.stack([skio.imread(_) for _ in ctps[index]], axis=-1)
         # gt = (skio.imread(gtps[index][1]) / 255)[:,:,np.newaxis]
-
         suv = np.stack([resize(skio.imread(_), (128, 128), preserve_range=True) for _ in suvps[index]], axis=-1)
         ct = np.stack([resize(skio.imread(_), (128, 128), preserve_range=True) for _ in ctps[index]], axis=-1)
         gt = (resize(skio.imread(gtps[index][1]) / 255, (128, 128), preserve_range=True) > 0).astype(np.int)[:, :,
@@ -167,11 +174,15 @@ def dataGene(batchSize, mode='train'):
             suvs = []
             cts = []
             gts = []
+        # print('index:'+str(index)+'/'+str(len(suvps)))
+        if index + 1 > len(suvps):
+            print(mode + ' complete')
         index = (index + 1) % len(suvps)
 
 
 if __name__ == '__main__':
     from keras.utils import plot_model
+    from keras.optimizers import RMSprop
     from keras_contrib.applications.densenet import DenseNetFCN
 
     genePath()
@@ -182,11 +193,16 @@ if __name__ == '__main__':
     print(len(testCtps))
     print(len(testSuvps))
 
-    model = DenseNetFCN(input_shape=(128, 128, 6), nb_layers_per_block=5, dropout_rate=0.5, nb_dense_block=4,
+    model = DenseNetFCN(input_shape=(128, 128, 6), nb_layers_per_block=5,
+                        # dropout_rate=0.5,
+                        nb_dense_block=4,
                         reduction=0.5,
                         initial_kernel_size=(3, 3),
                         init_conv_filters=16, growth_rate=16, classes=1, activation='sigmoid')
-    model.compile(Adam(config.lr), binary_focal_loss(gamma=2, alpha=0.1), metrics=['acc', dice, recall, precision])
+    # model.compile(RMSprop(config.lr, decay=0.995), binary_focal_loss(gamma=2, alpha=0.25),
+    #               metrics=['acc', dice, recall, precision])
+    model.compile(Adam(config.lr), binary_focal_loss(gamma=4, alpha=0.011),
+                  metrics=['acc', dice, recall, precision])
     # model.compile('adam', focal_tversky, metrics=['acc', dice, recall, precision])
     plot_model(model, 'tiramisu128x3.png', show_shapes=True)
     model.summary()
@@ -210,9 +226,13 @@ if __name__ == '__main__':
     #                     callbacks=[logger, mcp, lrReduce, estp, ], validation_data=dataGene(config.batchSize, 'test'),
     #                     validation_steps=np.ceil(len(testGtps) / config.batchSize))
 
-    model.fit_generator(dataGene(config.batchSize, 'train'), steps_per_epoch=np.ceil(len(testGtps) / config.batchSize),
+    # model.fit_generator(dataGene(config.batchSize, 'train'), steps_per_epoch=np.ceil(len(testGtps) / config.batchSize),
+    #                     epochs=config.epochs,
+    #                     callbacks=[logger, lrReduce, estp, ], validation_data=dataGene(config.batchSize, 'test'),
+    #                     validation_steps=np.ceil(len(trainGtps) / config.batchSize))
+    model.fit_generator(dataGene(config.batchSize, 'train'), steps_per_epoch=np.ceil(len(trainGtps) / config.batchSize),
                         epochs=config.epochs,
                         callbacks=[logger, lrReduce, estp, ], validation_data=dataGene(config.batchSize, 'test'),
-                        validation_steps=np.ceil(len(trainGtps) / config.batchSize))
+                        validation_steps=np.ceil(len(testGtps) / config.batchSize))
 
     visualLoss(os.path.join(logP, 'log.csv'))
