@@ -60,7 +60,7 @@ config.testGtps = []
 
 config.trainIds = [1, 4, 7, 11, 15, 17, 20, 23, 24, 25, 26, 31,
                    39, 32, 33, 34, 35, 36, 37, 38, 40, 41, 42, 43,
-                   44, 45, 46, 47, 48, 49, 50, 51, 52, 53,  55,
+                   44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 55,
                    56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67,
                    ]
 config.testIds = [68, 69, 70, 71, 72, 74, 76, 77, 78, 79, 73, 75, ]
@@ -200,7 +200,6 @@ if __name__ == '__main__':
 
     cpr = os.path.join(config.expRoot, 'checkPoint')
 
-
     if not os.path.exists(cpr):
         os.makedirs(cpr)
     logP = os.path.join(config.expRoot, 'log')
@@ -218,7 +217,7 @@ if __name__ == '__main__':
     model.fit_generator(dataGene(config.batchSize, 'train'),
                         steps_per_epoch=np.ceil(len(config.trainGtps) / config.batchSize),
                         epochs=config.epochs,
-                        callbacks=[logger, lrReduce, estp,mcp ], validation_data=dataGene(config.batchSize, 'test'),
+                        callbacks=[logger, lrReduce, estp, mcp], validation_data=dataGene(config.batchSize, 'test'),
                         validation_steps=np.ceil(len(config.testGtps) / config.batchSize))
 
     visualLoss(os.path.join(logP, 'log.csv'))
