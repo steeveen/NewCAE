@@ -162,7 +162,7 @@ def main():
     model = load_model(config.modelRootp,
                        custom_objects={'focal_loss': binary_focal_loss(gamma=3, alpha=0.1), 'dice': dice,
                                        'recall': recall, 'precision': precision, 'mse': mse})
-    # model = Model()
+    #     #     # model = Model()
     oriResult, recontrib = model.predict_generator(dataGene(config.batchSize),
                                                    np.ceil(len(config.gtps) / config.batchSize),
                                                    verbose=1)

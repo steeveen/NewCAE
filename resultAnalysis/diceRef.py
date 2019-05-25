@@ -28,24 +28,70 @@ from natsort import natsorted
 from glob import glob
 import csv
 import os
-preThr=0.1
+
+def calSen1(gt,pre,c):
+    '''
+    第一种算法，算个数，所有的金标准连通区中，能与pre的交集大于它自身的50%时，作为tp
+    :param gt:
+    :param pre:
+    :param c:
+    :return:
+    '''
+    sen = 0
+    gtLabel = label(gt, connectivity=c)
+    for i in range(1, np.max(gtLabel) + 1):
+        gi = (gtLabel == i).astype(np.uint8)
+        if np.sum(gi * pre) / np.sum(gi) > iouThr:
+            sen += 1
+    return sen / np.max(gtLabel)
+def calSen2(gt,pre,c):
+    '''
+    第二种算法，算体积，所有的金标准连通区中，能与pre的交集大于它自身的50%时，面积作为tp
+    :param gt:
+    :param pre:
+    :param c:
+    :return:
+    '''
+    sen = 0
+    gtLabel = label(gt, connectivity=c)
+    for i in range(1, np.max(gtLabel) + 1):
+        gi = (gtLabel == i).astype(np.uint8)
+        if np.sum(gi * pre) / np.sum(gi) > iouThr:
+            sen += np.sum(gi * pre)
+    return sen / np.sum(gt)
+def calSen3(gt,pre,c):
+    '''
+    第三种算法，不管连通区与预测的交集面积多大，所有交集区域面积都作为tp
+    :param gt:
+    :param pre:
+    :param c:
+    :return:
+    '''
+    return np.sum(gt*pre)/np.sum(gt)
+
+
+
+preThr=0.5
 iouThr=0.5
-connect=1
-root=r'E:\pyWorkspace\NewCAE\FCDenseNet\myDense\experimentCleanSlice3StackFocalLossSegFork\result_tts4-1(5)_1bfl030mse_bfl3,01_nlpb5_ndb5_red05_icf16_gr16_lr1e-4_dp05_Allr3 - 副本'
+connect=3
+calSen=calSen2
+# root=r'E:\pyWorkspace\NewCAE\FCDenseNet\myDense\experimentCleanSlice3StackFocalLossSegFork\result_tts4-1(5)_1bfl030mse_bfl3,01_nlpb5_ndb5_red05_icf16_gr16_lr1e-4_dp05_Allr3 - 副本'
+preRoot=r'E:\pyWorkspace\NewCAE\FCDenseNet\myDense\experimentCleanSlice3StackFocalLossSegFork\result_tts4-1(5)_1bfl030mse_bfl3,01_nlpb5_ndb5_red05_icf16_gr16_lr1e-4_dp05_Allr3 - 副本'
+gtRoot=r'E:\pyWorkspace\NewCAE\FCDenseNet\myDense\experimentCleanSlice3StackFocalLossSegFork\reference'
 contents=['DI-G,DI-R,Volume,Sen,\n']
 lst = [68, 69, 70, 72, 73, 74, 75, 76, 77, 78, 79]
-def loadData():
-    pass
+
+
 if __name__ == '__main__':
     digg=[]
     dirr=[]
     vv=[]
     senn=[]
     for id in lst:
-        gtp=os.path.join(root,str(id)+'_gt.pkl')
-        prep=os.path.join(root,'masked_'+str(id)+'.pkl')
+        gtp=os.path.join(gtRoot,str(id)+'_gt.pkl')
+        prep=os.path.join(preRoot,'masked_'+str(id)+'.pkl')
         if not os.path.exists(prep):
-            prep=os.path.join(root,str(id)+'.pkl')
+            prep=os.path.join(preRoot,str(id)+'.pkl')
         with open(gtp,'rb') as f:
             gt=pkl.load(f)
         with open(prep  ,'rb') as f:
@@ -67,18 +113,19 @@ if __name__ == '__main__':
         v=np.sum(s)/(np.sum(pre))
         vv.append(v)
 
-        sen=0
-        gtLabel=label(gt,connectivity=connect)
-        for i in range(1,np.max(gtLabel)+1):
-            gi=(gtLabel==i).astype(np.uint8)
-            if np.sum(gi*pre)/np.sum(gi)>iouThr:
-                sen+=1
-        sen=sen/np.max(gtLabel)
+        # sen=0
+        # gtLabel=label(gt,connectivity=connect)
+        # for i in range(1,np.max(gtLabel)+1):
+        #     gi=(gtLabel==i).astype(np.uint8)
+        #     if np.sum(gi*pre)/np.sum(gi)>iouThr:
+        #         sen+=1
+        # sen=sen/np.max(gtLabel)
+        sen=calSen(gt,pre,connect)
         senn.append(sen)
         print('id:%d, dig:%.4f, dir:%.4f, v:%.4f, sen:%.4f'%(id,DIG,DIR,v,sen))
         contents.append(str(DIG)+','+str(DIR)+','+str(v)+','+str(sen)+',\n')
     contents.append(str(np.mean(digg))+','+str(np.mean(dirr))+','+str(np.mean(vv))+','+str(np.mean(senn))+',\n')
     print('mean, dig:%.4f, dir:%.4f, v:%.4f, sen:%.4f' % (np.mean(digg), np.mean(dirr), np.mean(vv), np.mean(senn)))
-with open(r'diceAnalysis_preThr=%f_iouThr=%f_connect=%d.csv'%(preThr,iouThr,connect),'w') as f:
-    for line in contents:
-        f.write(line)
+    with open(r'diceAnalysis_preThr=%f_iouThr=%f_connect=%d_calSen=%s.csv'%(preThr,iouThr,connect,calSen.__name__),'w') as f:
+        for line in contents:
+            f.write(line)
